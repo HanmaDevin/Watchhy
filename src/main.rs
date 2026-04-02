@@ -5,7 +5,7 @@ use gtk::{
     prelude::GtkWindowExt,
 };
 
-const APP_ID: &str = "org.gtk_rs.HelloWorld";
+pub const APP_ID: &str = "org.hanmadevin.Watchhy";
 
 fn main() -> glib::ExitCode {
     let app = Application::builder().application_id(APP_ID).build();
