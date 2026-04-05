@@ -8,19 +8,8 @@ const AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
 
 const ALLANIME_REF: &str = "https://allmanga.to";
-const ALLANIME_BASE: &str = "allanime.day";
 const ALLANIME_API: &str = "https://api.allanime.day";
 const MODE: &str = "sub";
-
-pub fn get_links() {
-    let client = Client::new();
-    let url = format!("https://");
-    // let response_result = client.get(url)
-}
-
-fn get_provider_id(provider_name: &str) -> &str {
-    todo!()
-}
 
 pub fn search_anime(anime_name: &str) -> Vec<(String, String, u64)> {
     let search_gql = r#"query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}"#;
@@ -75,7 +64,7 @@ pub fn search_anime(anime_name: &str) -> Vec<(String, String, u64)> {
     animes
 }
 
-pub fn episode_list(show_id: &str) {
+pub fn episode_list(show_id: &str) -> Vec<String> {
     let episodes_list_gql =
         r#"query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}"#;
 
@@ -116,12 +105,48 @@ pub fn episode_list(show_id: &str) {
             a_num.partial_cmp(&b_num).unwrap()
         });
 
-        for item in episodes {
-            println!("Episode: {item}")
-        }
+        return episodes;
     }
+    Vec::new()
 }
 
-pub fn get_episode_url() {
-  
+pub fn get_episode_urls(show_id: &str, ep_no: &str) -> Vec<String> {
+    let episode_embed_gql = r#"query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { episodeString sourceUrls }}"#;
+
+    let variables = json!({
+      "showId": show_id,
+      "translationType": MODE,
+      "episodeString": ep_no
+    });
+
+    let client = Client::new();
+    let response_result = client
+        .get(format!("{ALLANIME_API}/api"))
+        .header(REFERER, ALLANIME_REF)
+        .header(USER_AGENT, AGENT)
+        .query(&[
+            ("variables", variables.to_string()),
+            ("query", episode_embed_gql.to_string()),
+        ])
+        .send();
+
+    let response = response_result.expect("Error in GET Request");
+    let body = response.text().expect("Error getting response body");
+
+    let v: serde_json::Value =
+        serde_json::from_str(&body).expect("Error serializing response body");
+
+    println!("Response from 'get_episode_url': {v:#?}");
+    let mut links: Vec<String> = Vec::new();
+    let sources = v["data"]["sourceUrls"].as_array().unwrap();
+    for source in sources {
+        match source["sourceName"].as_str().unwrap() {
+            "Yt-mp4" => links.push(source["sourceUrl"].to_string()),
+            "S-mp4" => links.push(source["sourceUrl"].to_string()),
+            "Luf-Mp4" => links.push(source["sourceUrl"].to_string()),
+            _ => links.push(String::new()),
+        }
+    }
+    links.retain(|f| !f.is_empty());
+    links
 }
