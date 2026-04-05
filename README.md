@@ -1,9 +1,5 @@
 # Watchhy
 
-This program should keep track of everything you are watching while it is
-running. For this it utilizes `playerctl`.
-It keeps everything in sync via git.
-
 ## Dependencies
 
 ### Fedora
