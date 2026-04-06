@@ -5,7 +5,7 @@ use gtk::{
     prelude::GtkWindowExt,
 };
 
-use crate::scraper::{episode_list, get_episode_urls, search_anime};
+use crate::scraper::{get_episode_streams, get_episode_urls};
 
 mod scraper;
 
@@ -18,7 +18,8 @@ fn main() {
 
     // app.run()
 
-    search_anime("One Piece");
+    let urls = get_episode_streams("ReooPAxPMsHM4KPMY", "1");
+    println!("{urls:#?}");
 }
 
 fn build_ui(app: &adw::Application) {

@@ -1,6 +1,7 @@
+use regex::bytes::Regex;
 use reqwest::{
     blocking::Client,
-    header::{REFERER, USER_AGENT},
+    header::{CONTENT_TYPE, REFERER, USER_AGENT},
 };
 use serde_json::json;
 
@@ -9,6 +10,7 @@ const AGENT: &str =
 
 const ALLANIME_REF: &str = "https://allmanga.to";
 const ALLANIME_API: &str = "https://api.allanime.day";
+const ALLANIME_BASE: &str = "allanime.day";
 const MODE: &str = "sub";
 
 pub fn search_anime(anime_name: &str) -> Vec<(String, String, u64)> {
@@ -28,16 +30,20 @@ pub fn search_anime(anime_name: &str) -> Vec<(String, String, u64)> {
 
     let client = Client::new();
     let response_result = client
-        .get(format!("{ALLANIME_API}/api"))
+        .post(format!("{ALLANIME_API}/api"))
         .header(REFERER, ALLANIME_REF)
         .header(USER_AGENT, AGENT)
-        .query(&[
-            ("variables", variables.to_string()),
-            ("query", search_gql.to_string()),
-        ])
+        .header(CONTENT_TYPE, "application/json")
+        .body(
+            json!({
+              "variables": variables,
+              "query": search_gql
+            })
+            .to_string(),
+        )
         .send();
 
-    let response = response_result.expect("Error in GET Request");
+    let response = response_result.expect("Error in POST Request");
     let body = response.text().expect("Error getting response body");
 
     let v: serde_json::Value =
@@ -74,16 +80,20 @@ pub fn episode_list(show_id: &str) -> Vec<String> {
 
     let client = Client::new();
     let response_result = client
-        .get(format!("{ALLANIME_API}/api"))
+        .post(format!("{ALLANIME_API}/api"))
         .header(REFERER, ALLANIME_REF)
+        .header(CONTENT_TYPE, "application/json")
         .header(USER_AGENT, AGENT)
-        .query(&[
-            ("variables", variables.to_string()),
-            ("query", episodes_list_gql.to_string()),
-        ])
+        .body(
+            json!({
+              "variables": variables,
+              "query": episodes_list_gql
+            })
+            .to_string(),
+        )
         .send();
 
-    let response = response_result.expect("Error in GET Request");
+    let response = response_result.expect("Error in POST Request");
     let body = response.text().expect("Error getting response body");
 
     let v: serde_json::Value =
@@ -121,32 +131,203 @@ pub fn get_episode_urls(show_id: &str, ep_no: &str) -> Vec<String> {
 
     let client = Client::new();
     let response_result = client
-        .get(format!("{ALLANIME_API}/api"))
+        .post(format!("{ALLANIME_API}/api"))
         .header(REFERER, ALLANIME_REF)
         .header(USER_AGENT, AGENT)
-        .query(&[
-            ("variables", variables.to_string()),
-            ("query", episode_embed_gql.to_string()),
-        ])
+        .header(CONTENT_TYPE, "application/json")
+        .body(
+            json!({
+              "variables": variables,
+              "query": episode_embed_gql
+            })
+            .to_string(),
+        )
         .send();
 
-    let response = response_result.expect("Error in GET Request");
+    let response = response_result.expect("Error in POST Request");
     let body = response.text().expect("Error getting response body");
 
     let v: serde_json::Value =
         serde_json::from_str(&body).expect("Error serializing response body");
 
-    println!("Response from 'get_episode_url': {v:#?}");
     let mut links: Vec<String> = Vec::new();
-    let sources = v["data"]["sourceUrls"].as_array().unwrap();
+    let sources = v["data"]["episode"]["sourceUrls"].as_array().unwrap();
     for source in sources {
         match source["sourceName"].as_str().unwrap() {
             "Yt-mp4" => links.push(source["sourceUrl"].to_string()),
             "S-mp4" => links.push(source["sourceUrl"].to_string()),
             "Luf-Mp4" => links.push(source["sourceUrl"].to_string()),
+            "Default" => links.push(source["sourceUrl"].to_string()),
             _ => links.push(String::new()),
         }
     }
-    links.retain(|f| !f.is_empty());
-    links
+    let mut decoded = links
+        .iter()
+        .map(|f| decode_provider_id(f.as_str()))
+        .collect::<Vec<String>>();
+    decoded.retain(|f| !f.is_empty());
+    decoded
+}
+
+pub fn get_episode_streams(show_id: &str, ep_no: &str) -> Vec<(String, String)> {
+    let decoded_urls = get_episode_urls(show_id, ep_no);
+    let client = Client::new();
+    let mut all_streams: Vec<(String, String)> = Vec::new();
+
+    for url in decoded_urls {
+        let api_url = if url.starts_with("http") {
+            continue;
+        } else {
+            format!("https://{}{}", ALLANIME_BASE, url)
+        };
+
+        let response = client
+            .get(&api_url)
+            .header(USER_AGENT, AGENT)
+            .header(REFERER, ALLANIME_REF)
+            .send();
+
+        println!("Response: {response:#?}");
+        if let Ok(res) = response {
+            let body = res.text().unwrap_or_default();
+            let json: serde_json::Value = serde_json::from_str(&body).unwrap_or(json!({}));
+
+            println!("json: {json:#?}");
+
+            if let Some(links) = json["links"].as_array() {
+                for link in links {
+                    let src = link["link"].as_str().unwrap_or("");
+                    let res_str = link["resolutionStr"].as_str().unwrap_or("Unknown");
+
+                    println!("src link: {src}");
+                    println!("Res: {res_str}");
+                    // Handle Wixmp (repackager) logic
+                    if src.contains("repackager.wixmp.com") {
+                        let base_link = src
+                            .replace("repackager.wixmp.com/", "")
+                            .split(".urlset")
+                            .next()
+                            .unwrap_or("")
+                            .to_string();
+                        // Simplified: capturing the quality from the resolutionStr
+                        all_streams.push((res_str.to_string(), base_link));
+                    } else {
+                        all_streams.push((res_str.to_string(), src.to_string()));
+                    }
+                }
+            }
+
+            // Handle HLS/m3u8 case from the response
+            if let Some(hls_url) = json["hls"]["url"].as_str() {
+                all_streams.push(("HLS".to_string(), hls_url.to_string()));
+            }
+        }
+    }
+    all_streams
+}
+
+pub fn select_quality(quality: &str, streams: Vec<(String, String)>) -> String {
+  let re = Regex::new(r#""#).expect("Could not create regex");
+}
+
+fn decode_provider_id(input: &str) -> String {
+    let cleaned = input.replace("--", "").replace('"', "");
+
+    let translated: String = cleaned
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| {
+            let segment = std::str::from_utf8(chunk).unwrap_or("");
+            match segment.trim() {
+                "79" => "A",
+                "7a" => "B",
+                "7b" => "C",
+                "7c" => "D",
+                "7d" => "E",
+                "7e" => "F",
+                "7f" => "G",
+                "70" => "H",
+                "71" => "I",
+                "72" => "J",
+                "73" => "K",
+                "74" => "L",
+                "75" => "M",
+                "76" => "N",
+                "77" => "O",
+                "68" => "P",
+                "69" => "Q",
+                "6a" => "R",
+                "6b" => "S",
+                "6c" => "T",
+                "6d" => "U",
+                "6e" => "V",
+                "6f" => "W",
+                "60" => "X",
+                "61" => "Y",
+                "62" => "Z",
+                "59" => "a",
+                "5a" => "b",
+                "5b" => "c",
+                "5c" => "d",
+                "5d" => "e",
+                "5e" => "f",
+                "5f" => "g",
+                "50" => "h",
+                "51" => "i",
+                "52" => "j",
+                "53" => "k",
+                "54" => "l",
+                "55" => "m",
+                "56" => "n",
+                "57" => "o",
+                "48" => "p",
+                "49" => "q",
+                "4a" => "r",
+                "4b" => "s",
+                "4c" => "t",
+                "4d" => "u",
+                "4e" => "v",
+                "4f" => "w",
+                "40" => "x",
+                "41" => "y",
+                "42" => "z",
+                "08" => "0",
+                "09" => "1",
+                "0a" => "2",
+                "0b" => "3",
+                "0c" => "4",
+                "0d" => "5",
+                "0e" => "6",
+                "0f" => "7",
+                "00" => "8",
+                "01" => "9",
+                "15" => "-",
+                "16" => ".",
+                "67" => "_",
+                "46" => "~",
+                "02" => ":",
+                "17" => "/",
+                "07" => "?",
+                "1b" => "#",
+                "63" => "[",
+                "65" => "]",
+                "78" => "@",
+                "19" => "!",
+                "1c" => "$",
+                "1e" => "&",
+                "10" => "(",
+                "11" => ")",
+                "12" => "*",
+                "13" => "+",
+                "14" => ",",
+                "03" => ";",
+                "05" => "=",
+                "1d" => "%",
+                _ => segment, // Keep as is if no match
+            }
+        })
+        .collect();
+
+    // 3. The final sed: s/\/clock/\/clock\.json/
+    translated.replace("/clock", "/clock.json")
 }
