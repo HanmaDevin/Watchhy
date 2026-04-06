@@ -5,6 +5,8 @@ use reqwest::{
 };
 use serde_json::json;
 
+use crate::models::Quality;
+
 const AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
 
@@ -215,11 +217,10 @@ pub fn get_episode_streams(show_id: &str, ep_no: &str) -> Vec<(String, String)> 
     all_streams
 }
 
-pub fn video_url_with_quality(quality: &str, stream: &str) -> String {
+pub fn video_url_with_quality(quality: Quality, stream: &str) -> String {
     let regex =
         Regex::new(r"(?mu)(?<base>https://[\w\.]+/\w+/\w+/)[,\w]+(?<extension>.*)").unwrap();
-    let substitution = format!("${{base}}{quality}$extension");
-
+    let substitution = format!("${{base}}{}$extension", quality);
     regex
         .replace_all(stream, substitution.as_str())
         .into_owned()

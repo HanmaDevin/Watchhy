@@ -5,6 +5,7 @@ use gtk::{
     prelude::GtkWindowExt,
 };
 
+mod models;
 mod scraper;
 
 pub const APP_ID: &str = "org.hanmadevin.Watchhy";
