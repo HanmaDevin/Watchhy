@@ -252,7 +252,7 @@ impl Stream {
         all_streams
     }
 
-    pub fn video_url_with_quality(quality: Quality, stream: &str) -> String {
+    pub fn get_video_url_with_quality(quality: Quality, stream: &str) -> String {
         let regex =
             Regex::new(r"(?mu)(?<base>https://[\w\.]+/\w+/\w+/)[,\w]+(?<extension>.*)").unwrap();
         let substitution = format!("${{base}}{}$extension", quality);
