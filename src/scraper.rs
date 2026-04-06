@@ -1,4 +1,4 @@
-use regex::bytes::Regex;
+use regex::Regex;
 use reqwest::{
     blocking::Client,
     header::{CONTENT_TYPE, REFERER, USER_AGENT},
@@ -56,13 +56,11 @@ pub fn search_anime(anime_name: &str) -> Vec<(String, String, u64)> {
             let id = show["_id"].as_str().unwrap_or("");
             let name = show["name"].as_str().unwrap_or("");
 
-            // Replicating the sed logic for specific episode counts based on mode
             let episodes = &show["availableEpisodes"][MODE];
 
             if let Some(count) = episodes.as_u64() {
                 if count > 0 {
                     animes.push((id.to_string(), name.to_string(), count));
-                    println!("{}\t{} ({} episodes)", id, name, count);
                 }
             }
         }
@@ -99,16 +97,12 @@ pub fn episode_list(show_id: &str) -> Vec<String> {
     let v: serde_json::Value =
         serde_json::from_str(&body).expect("Error serializing response body");
 
-    // 1. Dig into availableEpisodesDetail
-    // 2. Access the mode (sub/dub)
-    // 3. Extract the array and sort it
     if let Some(ep_list) = v["data"]["show"]["availableEpisodesDetail"][MODE].as_array() {
         let mut episodes: Vec<String> = ep_list
             .iter()
             .filter_map(|json| json.as_str().map(|s| s.to_string()))
             .collect();
 
-        // Sort naturally (equivalent to sort -n)
         episodes.sort_by(|a, b| {
             let a_num: f64 = a.parse().unwrap_or(0.0);
             let b_num: f64 = b.parse().unwrap_or(0.0);
@@ -130,7 +124,7 @@ pub fn get_episode_urls(show_id: &str, ep_no: &str) -> Vec<String> {
     });
 
     let client = Client::new();
-    let response_result = client
+    let response = client
         .post(format!("{ALLANIME_API}/api"))
         .header(REFERER, ALLANIME_REF)
         .header(USER_AGENT, AGENT)
@@ -142,9 +136,9 @@ pub fn get_episode_urls(show_id: &str, ep_no: &str) -> Vec<String> {
             })
             .to_string(),
         )
-        .send();
+        .send()
+        .expect("Error in POST Request");
 
-    let response = response_result.expect("Error in POST Request");
     let body = response.text().expect("Error getting response body");
 
     let v: serde_json::Value =
@@ -178,7 +172,7 @@ pub fn get_episode_streams(show_id: &str, ep_no: &str) -> Vec<(String, String)> 
         let api_url = if url.starts_with("http") {
             continue;
         } else {
-            format!("https://{}{}", ALLANIME_BASE, url)
+            format!("https://{ALLANIME_BASE}{url}")
         };
 
         let response = client
@@ -187,20 +181,15 @@ pub fn get_episode_streams(show_id: &str, ep_no: &str) -> Vec<(String, String)> 
             .header(REFERER, ALLANIME_REF)
             .send();
 
-        println!("Response: {response:#?}");
         if let Ok(res) = response {
             let body = res.text().unwrap_or_default();
             let json: serde_json::Value = serde_json::from_str(&body).unwrap_or(json!({}));
-
-            println!("json: {json:#?}");
 
             if let Some(links) = json["links"].as_array() {
                 for link in links {
                     let src = link["link"].as_str().unwrap_or("");
                     let res_str = link["resolutionStr"].as_str().unwrap_or("Unknown");
 
-                    println!("src link: {src}");
-                    println!("Res: {res_str}");
                     // Handle Wixmp (repackager) logic
                     if src.contains("repackager.wixmp.com") {
                         let base_link = src
@@ -226,8 +215,14 @@ pub fn get_episode_streams(show_id: &str, ep_no: &str) -> Vec<(String, String)> 
     all_streams
 }
 
-pub fn select_quality(quality: &str, streams: Vec<(String, String)>) -> String {
-  let re = Regex::new(r#""#).expect("Could not create regex");
+pub fn video_url_with_quality(quality: &str, stream: &str) -> String {
+    let regex =
+        Regex::new(r"(?mu)(?<base>https://[\w\.]+/\w+/\w+/)[,\w]+(?<extension>.*)").unwrap();
+    let substitution = format!("${{base}}{quality}$extension");
+
+    regex
+        .replace_all(stream, substitution.as_str())
+        .into_owned()
 }
 
 fn decode_provider_id(input: &str) -> String {

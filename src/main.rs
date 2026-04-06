@@ -5,21 +5,16 @@ use gtk::{
     prelude::GtkWindowExt,
 };
 
-use crate::scraper::{get_episode_streams, get_episode_urls};
-
 mod scraper;
 
 pub const APP_ID: &str = "org.hanmadevin.Watchhy";
 
-fn main() {
-    // let app = adw::Application::builder().application_id(APP_ID).build();
+fn main() -> glib::ExitCode {
+    let app = adw::Application::builder().application_id(APP_ID).build();
 
-    // app.connect_activate(build_ui);
+    app.connect_activate(build_ui);
 
-    // app.run()
-
-    let urls = get_episode_streams("ReooPAxPMsHM4KPMY", "1");
-    println!("{urls:#?}");
+    app.run()
 }
 
 fn build_ui(app: &adw::Application) {
