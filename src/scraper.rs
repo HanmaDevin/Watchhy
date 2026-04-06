@@ -5,7 +5,7 @@ use reqwest::{
 };
 use serde_json::json;
 
-use crate::models::Quality;
+use crate::models::*;
 
 const AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0";
@@ -13,217 +13,253 @@ const AGENT: &str =
 const ALLANIME_REF: &str = "https://allmanga.to";
 const ALLANIME_API: &str = "https://api.allanime.day";
 const ALLANIME_BASE: &str = "allanime.day";
-const MODE: &str = "sub";
 
-pub fn search_anime(anime_name: &str) -> Vec<(String, String, u64)> {
-    let search_gql = r#"query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}"#;
-
-    let variables = json!({
-      "search": {
-        "allowAdult": false,
-        "allowUnknown": false,
-        "query": anime_name
-      },
-      "limit": 40,
-      "page": 1,
-      "translationType": MODE,
-      "countryOrigin": "ALL"
-    });
-
-    let client = Client::new();
-    let response_result = client
-        .post(format!("{ALLANIME_API}/api"))
-        .header(REFERER, ALLANIME_REF)
-        .header(USER_AGENT, AGENT)
-        .header(CONTENT_TYPE, "application/json")
-        .body(
-            json!({
-              "variables": variables,
-              "query": search_gql
-            })
-            .to_string(),
-        )
-        .send();
-
-    let response = response_result.expect("Error in POST Request");
-    let body = response.text().expect("Error getting response body");
-
-    let v: serde_json::Value =
-        serde_json::from_str(&body).expect("Error serializing response body");
-
-    let mut animes: Vec<(String, String, u64)> = Vec::new();
-
-    if let Some(edges) = v["data"]["shows"]["edges"].as_array() {
-        for show in edges {
-            let id = show["_id"].as_str().unwrap_or("");
-            let name = show["name"].as_str().unwrap_or("");
-
-            let episodes = &show["availableEpisodes"][MODE];
-
-            if let Some(count) = episodes.as_u64() {
-                if count > 0 {
-                    animes.push((id.to_string(), name.to_string(), count));
-                }
-            }
-        }
-    }
-    animes
+pub struct Stream {
+    anime_name: String,
+    quality: Quality,
+    show_id: String,
+    mode: Mode,
+    ep_num: u64,
 }
 
-pub fn episode_list(show_id: &str) -> Vec<String> {
-    let episodes_list_gql =
-        r#"query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}"#;
+impl Stream {
+    pub fn new(
+        &self,
+        anime_name: String,
+        quality: Quality,
+        show_id: &str,
+        mode: Mode,
+        ep_num: u64,
+    ) -> Self {
+        Self {
+            anime_name,
+            quality,
+            show_id: show_id.to_string(),
+            mode,
+            ep_num,
+        }
+    }
 
-    let variables = json!({
-      "showId": show_id
-    });
+    pub fn change_quality(&mut self, quality: Quality) {
+        self.quality = quality
+    }
 
-    let client = Client::new();
-    let response_result = client
-        .post(format!("{ALLANIME_API}/api"))
-        .header(REFERER, ALLANIME_REF)
-        .header(CONTENT_TYPE, "application/json")
-        .header(USER_AGENT, AGENT)
-        .body(
-            json!({
-              "variables": variables,
-              "query": episodes_list_gql
-            })
-            .to_string(),
-        )
-        .send();
+    pub fn change_mode(&mut self, mode: Mode) {
+        self.mode = mode
+    }
 
-    let response = response_result.expect("Error in POST Request");
-    let body = response.text().expect("Error getting response body");
+    pub fn search_anime(&self) -> Vec<(String, String, u64)> {
+        let search_gql = r#"query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}"#;
 
-    let v: serde_json::Value =
-        serde_json::from_str(&body).expect("Error serializing response body");
-
-    if let Some(ep_list) = v["data"]["show"]["availableEpisodesDetail"][MODE].as_array() {
-        let mut episodes: Vec<String> = ep_list
-            .iter()
-            .filter_map(|json| json.as_str().map(|s| s.to_string()))
-            .collect();
-
-        episodes.sort_by(|a, b| {
-            let a_num: f64 = a.parse().unwrap_or(0.0);
-            let b_num: f64 = b.parse().unwrap_or(0.0);
-            a_num.partial_cmp(&b_num).unwrap()
+        let variables = json!({
+          "search": {
+            "allowAdult": false,
+            "allowUnknown": false,
+            "query": self.anime_name
+          },
+          "limit": 40,
+          "page": 1,
+          "translationType": self.mode.to_string(),
+          "countryOrigin": "ALL"
         });
 
-        return episodes;
-    }
-    Vec::new()
-}
-
-pub fn get_episode_urls(show_id: &str, ep_no: &str) -> Vec<String> {
-    let episode_embed_gql = r#"query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { episodeString sourceUrls }}"#;
-
-    let variables = json!({
-      "showId": show_id,
-      "translationType": MODE,
-      "episodeString": ep_no
-    });
-
-    let client = Client::new();
-    let response = client
-        .post(format!("{ALLANIME_API}/api"))
-        .header(REFERER, ALLANIME_REF)
-        .header(USER_AGENT, AGENT)
-        .header(CONTENT_TYPE, "application/json")
-        .body(
-            json!({
-              "variables": variables,
-              "query": episode_embed_gql
-            })
-            .to_string(),
-        )
-        .send()
-        .expect("Error in POST Request");
-
-    let body = response.text().expect("Error getting response body");
-
-    let v: serde_json::Value =
-        serde_json::from_str(&body).expect("Error serializing response body");
-
-    let mut links: Vec<String> = Vec::new();
-    let sources = v["data"]["episode"]["sourceUrls"].as_array().unwrap();
-    for source in sources {
-        match source["sourceName"].as_str().unwrap() {
-            "Yt-mp4" => links.push(source["sourceUrl"].to_string()),
-            "S-mp4" => links.push(source["sourceUrl"].to_string()),
-            "Luf-Mp4" => links.push(source["sourceUrl"].to_string()),
-            "Default" => links.push(source["sourceUrl"].to_string()),
-            _ => links.push(String::new()),
-        }
-    }
-    let mut decoded = links
-        .iter()
-        .map(|f| decode_provider_id(f.as_str()))
-        .collect::<Vec<String>>();
-    decoded.retain(|f| !f.is_empty());
-    decoded
-}
-
-pub fn get_episode_streams(show_id: &str, ep_no: &str) -> Vec<(String, String)> {
-    let decoded_urls = get_episode_urls(show_id, ep_no);
-    let client = Client::new();
-    let mut all_streams: Vec<(String, String)> = Vec::new();
-
-    for url in decoded_urls {
-        let api_url = if url.starts_with("http") {
-            continue;
-        } else {
-            format!("https://{ALLANIME_BASE}{url}")
-        };
-
-        let response = client
-            .get(&api_url)
-            .header(USER_AGENT, AGENT)
+        let client = Client::new();
+        let response_result = client
+            .post(format!("{ALLANIME_API}/api"))
             .header(REFERER, ALLANIME_REF)
+            .header(USER_AGENT, AGENT)
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                json!({
+                  "variables": variables,
+                  "query": search_gql
+                })
+                .to_string(),
+            )
             .send();
 
-        if let Ok(res) = response {
-            let body = res.text().unwrap_or_default();
-            let json: serde_json::Value = serde_json::from_str(&body).unwrap_or(json!({}));
+        let response = response_result.expect("Error in POST Request");
+        let body = response.text().expect("Error getting response body");
 
-            if let Some(links) = json["links"].as_array() {
-                for link in links {
-                    let src = link["link"].as_str().unwrap_or("");
-                    let res_str = link["resolutionStr"].as_str().unwrap_or("Unknown");
+        let v: serde_json::Value =
+            serde_json::from_str(&body).expect("Error serializing response body");
 
-                    // Handle Wixmp (repackager) logic
-                    if src.contains("repackager.wixmp.com") {
-                        let base_link = src
-                            .replace("repackager.wixmp.com/", "")
-                            .split(".urlset")
-                            .next()
-                            .unwrap_or("")
-                            .to_string();
-                        // Simplified: capturing the quality from the resolutionStr
-                        all_streams.push((res_str.to_string(), base_link));
-                    } else {
-                        all_streams.push((res_str.to_string(), src.to_string()));
+        let mut animes: Vec<(String, String, u64)> = Vec::new();
+
+        if let Some(edges) = v["data"]["shows"]["edges"].as_array() {
+            for show in edges {
+                let id = show["_id"].as_str().unwrap_or("");
+                let name = show["name"].as_str().unwrap_or("");
+
+                let episodes = &show["availableEpisodes"][self.mode.to_string()];
+
+                if let Some(count) = episodes.as_u64() {
+                    if count > 0 {
+                        animes.push((id.to_string(), name.to_string(), count));
                     }
                 }
             }
+        }
+        animes
+    }
 
-            // Handle HLS/m3u8 case from the response
-            if let Some(hls_url) = json["hls"]["url"].as_str() {
-                all_streams.push(("HLS".to_string(), hls_url.to_string()));
+    pub fn episode_list(&self) -> Vec<String> {
+        let episodes_list_gql =
+            r#"query ($showId: String!) { show( _id: $showId ) { _id availableEpisodesDetail }}"#;
+
+        let variables = json!({
+          "showId": self.show_id
+        });
+
+        let client = Client::new();
+        let response_result = client
+            .post(format!("{ALLANIME_API}/api"))
+            .header(REFERER, ALLANIME_REF)
+            .header(CONTENT_TYPE, "application/json")
+            .header(USER_AGENT, AGENT)
+            .body(
+                json!({
+                  "variables": variables,
+                  "query": episodes_list_gql
+                })
+                .to_string(),
+            )
+            .send();
+
+        let response = response_result.expect("Error in POST Request");
+        let body = response.text().expect("Error getting response body");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&body).expect("Error serializing response body");
+
+        if let Some(ep_list) =
+            v["data"]["show"]["availableEpisodesDetail"][self.mode.to_string()].as_array()
+        {
+            let mut episodes: Vec<String> = ep_list
+                .iter()
+                .filter_map(|json| json.as_str().map(|s| s.to_string()))
+                .collect();
+
+            episodes.sort_by(|a, b| {
+                let a_num: f64 = a.parse().unwrap_or(0.0);
+                let b_num: f64 = b.parse().unwrap_or(0.0);
+                a_num.partial_cmp(&b_num).unwrap()
+            });
+
+            return episodes;
+        }
+        Vec::new()
+    }
+
+    pub fn get_episode_urls(&self) -> Vec<String> {
+        let episode_embed_gql = r#"query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode( showId: $showId translationType: $translationType episodeString: $episodeString ) { episodeString sourceUrls }}"#;
+
+        let variables = json!({
+          "showId": self.show_id,
+          "translationType": self.mode.to_string(),
+          "episodeString": self.ep_num
+        });
+
+        let client = Client::new();
+        let response = client
+            .post(format!("{ALLANIME_API}/api"))
+            .header(REFERER, ALLANIME_REF)
+            .header(USER_AGENT, AGENT)
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                json!({
+                  "variables": variables,
+                  "query": episode_embed_gql
+                })
+                .to_string(),
+            )
+            .send()
+            .expect("Error in POST Request");
+
+        let body = response.text().expect("Error getting response body");
+
+        let v: serde_json::Value =
+            serde_json::from_str(&body).expect("Error serializing response body");
+
+        let mut links: Vec<String> = Vec::new();
+        let sources = v["data"]["episode"]["sourceUrls"].as_array().unwrap();
+        for source in sources {
+            match source["sourceName"].as_str().unwrap() {
+                "Yt-mp4" => links.push(source["sourceUrl"].to_string()),
+                "S-mp4" => links.push(source["sourceUrl"].to_string()),
+                "Luf-Mp4" => links.push(source["sourceUrl"].to_string()),
+                "Default" => links.push(source["sourceUrl"].to_string()),
+                _ => links.push(String::new()),
             }
         }
+        let mut decoded = links
+            .iter()
+            .map(|f| decode_provider_id(f.as_str()))
+            .collect::<Vec<String>>();
+        decoded.retain(|f| !f.is_empty());
+        decoded
     }
-    all_streams
-}
 
-pub fn video_url_with_quality(quality: Quality, stream: &str) -> String {
-    let regex =
-        Regex::new(r"(?mu)(?<base>https://[\w\.]+/\w+/\w+/)[,\w]+(?<extension>.*)").unwrap();
-    let substitution = format!("${{base}}{}$extension", quality);
-    regex
-        .replace_all(stream, substitution.as_str())
-        .into_owned()
+    pub fn get_episode_streams(&self) -> Vec<(String, String)> {
+        let decoded_urls = self.get_episode_urls();
+        let client = Client::new();
+        let mut all_streams: Vec<(String, String)> = Vec::new();
+
+        for url in decoded_urls {
+            let api_url = if url.starts_with("http") {
+                continue;
+            } else {
+                format!("https://{ALLANIME_BASE}{url}")
+            };
+
+            let response = client
+                .get(&api_url)
+                .header(USER_AGENT, AGENT)
+                .header(REFERER, ALLANIME_REF)
+                .send();
+
+            if let Ok(res) = response {
+                let body = res.text().unwrap_or_default();
+                let json: serde_json::Value = serde_json::from_str(&body).unwrap_or(json!({}));
+
+                if let Some(links) = json["links"].as_array() {
+                    for link in links {
+                        let src = link["link"].as_str().unwrap_or("");
+                        let res_str = link["resolutionStr"].as_str().unwrap_or("Unknown");
+
+                        // Handle Wixmp (repackager) logic
+                        if src.contains("repackager.wixmp.com") {
+                            let base_link = src
+                                .replace("repackager.wixmp.com/", "")
+                                .split(".urlset")
+                                .next()
+                                .unwrap_or("")
+                                .to_string();
+                            // Simplified: capturing the quality from the resolutionStr
+                            all_streams.push((res_str.to_string(), base_link));
+                        } else {
+                            all_streams.push((res_str.to_string(), src.to_string()));
+                        }
+                    }
+                }
+
+                // Handle HLS/m3u8 case from the response
+                if let Some(hls_url) = json["hls"]["url"].as_str() {
+                    all_streams.push(("HLS".to_string(), hls_url.to_string()));
+                }
+            }
+        }
+        all_streams
+    }
+
+    pub fn video_url_with_quality(quality: Quality, stream: &str) -> String {
+        let regex =
+            Regex::new(r"(?mu)(?<base>https://[\w\.]+/\w+/\w+/)[,\w]+(?<extension>.*)").unwrap();
+        let substitution = format!("${{base}}{}$extension", quality);
+        regex
+            .replace_all(stream, substitution.as_str())
+            .into_owned()
+    }
 }
 
 fn decode_provider_id(input: &str) -> String {
