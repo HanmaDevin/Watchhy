@@ -347,6 +347,5 @@ fn decode_provider_id(input: &str) -> String {
         })
         .collect();
 
-    // 3. The final sed: s/\/clock/\/clock\.json/
     translated.replace("/clock", "/clock.json")
 }
