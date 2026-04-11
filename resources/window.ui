@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<interface>
+  <!-- Required libraries -->
+  <requires lib="gtk" version="4.0" />
+  <requires lib="adwaita" version="1.0" />
+
+  <!-- Main application window -->
+  <object class="AdwApplicationWindow" id="main_window">
+    <property name="title">Watchhy</property>
+    <property name="default-width">900</property>
+    <property name="default-height">640</property>
+    </object>
+</interface>
