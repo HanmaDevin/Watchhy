@@ -1,3 +1,6 @@
+use std::cell::OnceCell;
+
+use gtk::gio::Settings;
 use gtk::glib::subclass::InitializingObject;
 use gtk::{CompositeTemplate, SearchEntry};
 
@@ -11,6 +14,7 @@ pub struct Window {
     #[template_child]
     // variable name has to be the `id` field of object
     pub search_entry: TemplateChild<SearchEntry>,
+    pub settings: OnceCell<Settings>,
 }
 
 #[glib::object_subclass]
@@ -34,10 +38,22 @@ impl ObjectImpl for Window {
 
         let obj = self.obj();
         obj.get_search();
+        obj.setup_settings();
+        obj.load_window_size();
     }
 }
 impl WidgetImpl for Window {}
 
-impl WindowImpl for Window {}
+impl WindowImpl for Window {
+    // Save window state right before the window will be closed
+    fn close_request(&self) -> glib::Propagation {
+        // Save window size
+        self.obj()
+            .save_window_size()
+            .expect("Failed to save window state");
+        // Allow to invoke other event handlers
+        glib::Propagation::Proceed
+    }
+}
 
 impl ApplicationWindowImpl for Window {}
