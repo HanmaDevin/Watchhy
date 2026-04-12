@@ -19,6 +19,5 @@ fn main() -> gtk::glib::ExitCode {
 
 fn build_ui(app: &adw::Application) {
     let window = Window::new(app);
-
     window.present();
 }

@@ -23,6 +23,6 @@ impl Window {
     pub fn get_search(&self) -> SignalHandlerId {
         self.imp()
             .search_entry
-            .connect_search_changed(|e| println!("{}", e.text()))
+            .connect_activate(|e| println!("Search Text: {}", e.text()))
     }
 }

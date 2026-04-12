@@ -8,7 +8,9 @@ use gtk::glib;
 #[derive(CompositeTemplate, Default)]
 #[template(resource = "/org/hanmadevin/watchhy/window.ui")]
 pub struct Window {
-    pub search_entry: SearchEntry,
+    #[template_child]
+    // variable name has to be the `id` field of object
+    pub search_entry: TemplateChild<SearchEntry>,
 }
 
 #[glib::object_subclass]
